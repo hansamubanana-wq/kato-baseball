@@ -19,17 +19,15 @@ const config = {
 const game = new Phaser.Game(config);
 
 let ball, batter, bat, pitcher;
-let score = 0;
-let outCount = 0;
-let combo = 0; // 覚醒用のコンボ
-let scoreText, messageText, outText, quoteText;
+let score = 0, outCount = 0, combo = 0;
+let stamina = 100; // スタミナシステム
+let staminaBar, chargeBar;
+let scoreText, messageText, outText;
 let isSwinging = false;
 let ballState = 'title'; 
 let gameMode = 'batter'; 
-let selectedCourse = 400; 
-let selectedType = 'straight'; 
-
-const katoQuotes = ["よし！", "完璧だ！", "熱血覚醒！", "教育の力だ！", "単位倍増！"];
+let swingPower = 0; // 強振チャージ
+let isCharging = false;
 
 function preload() {
     this.load.audio('hit', 'https://labs.phaser.io/assets/audio/SoundEffects/p-town-spinnin.mp3');
@@ -51,9 +49,19 @@ function create() {
     bat = this.add.sprite(355, 500, 'bat_dot').setOrigin(0.5, 0.9).setScale(2);
     ball = this.add.sprite(400, 190, 'ball_dot').setScale(0.1).setVisible(false);
     
+    // --- UI強化 ---
+    // スタミナバー（外枠）
+    this.add.rectangle(600, 40, 154, 24, 0x000000);
+    staminaBar = this.add.rectangle(600, 40, 150, 20, 0x00ff00);
+    this.add.text(500, 30, 'STAMINA', { fontSize: '18px', fill: '#fff' });
+
+    // チャージバー（バッティング用）
+    this.add.rectangle(400, 580, 204, 14, 0x000000);
+    chargeBar = this.add.rectangle(400, 580, 0, 10, 0xffff00);
+
     scoreText = this.add.text(20, 20, '', { fontSize: '32px', fill: '#fff', fontStyle: 'bold' });
     outText = this.add.text(20, 65, '', { fontSize: '24px', fill: '#f00', fontStyle: 'bold' });
-    messageText = this.add.text(400, 300, 'KATO BASEBALL', { fontSize: '60px', fill: '#ff0', fontStyle: 'bold' }).setOrigin(0.5);
+    messageText = this.add.text(400, 300, 'KATO BASEBALL PRO', { fontSize: '50px', fill: '#ff0', fontStyle: 'bold' }).setOrigin(0.5);
     
     let btnBatter = this.add.text(250, 400, '[ BATTER ]', { fontSize: '32px', fill: '#fff', backgroundColor: '#00f' }).setPadding(10).setInteractive();
     let btnPitcher = this.add.text(450, 400, '[ PITCHER ]', { fontSize: '32px', fill: '#fff', backgroundColor: '#f00' }).setPadding(10).setInteractive();
@@ -63,26 +71,38 @@ function create() {
 
     this.particles = this.add.particles(0, 0, 'spark', { speed: 200, scale: { start: 2, end: 0 }, emitting: false });
 
-    this.input.on('pointerdown', (pointer) => {
+    // --- 入力制御 ---
+    this.input.on('pointerdown', () => {
         if (ballState === 'ready' && gameMode === 'batter') preparePitch.call(this);
-        else if (!isSwinging && ballState === 'pitching' && gameMode === 'batter') swingBat.call(this);
-        else if (ballState === 'ready' && gameMode === 'pitcher') handlePitcherControl.call(this, pointer);
+        else if (ballState === 'pitching' && gameMode === 'batter') isCharging = true;
+        else if (ballState === 'ready' && gameMode === 'pitcher') preparePitch.call(this);
+    });
+
+    this.input.on('pointerup', () => {
+        if (isCharging) {
+            swingBat.call(this);
+            isCharging = false;
+        }
     });
 }
 
 function startGame(scene, b1, b2) {
     b1.destroy(); b2.destroy();
-    ballState = 'ready'; score = 0; outCount = 0; combo = 0;
+    ballState = 'ready'; score = 0; outCount = 0; stamina = 100;
     scoreText.setText(gameMode === 'batter' ? 'HOMERUNS: 0' : 'STRIKEOUTS: 0');
     updateOutDisplay();
-    messageText.setText('PLAY BALL!');
 }
 
-function handlePitcherControl(pointer) {
-    selectedCourse = pointer.x;
-    selectedType = ['straight', 'curve', 'fork'][Phaser.Math.Between(0, 2)];
-    if (combo >= 2) selectedType = 'disappear'; // 必殺：消える魔球
-    preparePitch.call(this);
+function update() {
+    // スタミナバーの更新
+    staminaBar.width = stamina * 1.5;
+    if (stamina < 30) staminaBar.setFillStyle(0xff0000);
+
+    // チャージバーの更新
+    if (isCharging && swingPower < 100) {
+        swingPower += 2;
+        chargeBar.width = swingPower * 2;
+    }
 }
 
 function drawStadium(scene) {
@@ -104,71 +124,57 @@ function generateCharacterTextures(scene) {
 }
 
 function preparePitch() {
+    if (stamina <= 0) {
+        messageText.setText('OUT OF STAMINA');
+        return;
+    }
     ballState = 'wait';
+    stamina -= 5;
     this.tweens.add({ targets: pitcher, scaleX: 1.2, duration: 200, yoyo: true, onComplete: () => startPitch.call(this) });
 }
 
 function startPitch() {
     ballState = 'pitching';
-    ball.setVisible(true).setPosition(400, 190).setScale(0.1).setAlpha(1);
+    ball.setVisible(true).setPosition(400, 190).setScale(0.1);
     
-    let targetX = (gameMode === 'batter') ? 400 + Phaser.Math.Between(-30, 30) : selectedCourse;
-    let type = (gameMode === 'batter') ? ['straight', 'curve', 'fork'][Phaser.Math.Between(0, 2)] : selectedType;
-    let duration = 1000 - (score * 15);
+    let duration = 1000 - (score * 10);
+    if (stamina < 30) duration += 200; // スタミナ切れで球が遅くなる
 
-    let pitchConfig = {
+    this.tweens.add({
         targets: ball,
-        x: targetX, y: 530, scale: 4.5,
+        x: 400 + Phaser.Math.Between(-30, 30),
+        y: 530, scale: 4.5,
         duration: Math.max(duration, 300),
         ease: 'Cubic.easeIn',
-        onUpdate: () => {
-            if (type === 'disappear' && ball.scale > 1.5) ball.setAlpha(0); // 消える魔球
-        },
         onComplete: () => {
             if (ballState === 'pitching') {
                 ballState = 'missed';
                 messageText.setText('STRIKE!');
-                this.sound.play('out', { volume: 0.5 });
-                if (gameMode === 'pitcher') { score++; combo++; } else { outCount++; combo = 0; }
-                scoreText.setText((gameMode === 'batter' ? 'HOMERUNS: ' : 'STRIKEOUTS: ') + score);
+                outCount++;
                 updateOutDisplay();
                 this.time.delayedCall(1000, resetBall);
             }
         }
-    };
-    if (type === 'curve') pitchConfig.x += 160;
-    if (type === 'fork') pitchConfig.duration += 400;
-    this.tweens.add(pitchConfig);
-
-    if (gameMode === 'pitcher') {
-        this.time.delayedCall(pitchConfig.duration * 0.8, () => {
-            if (ballState === 'pitching') if (Phaser.Math.Between(0, 10) > 8) swingBat.call(this);
-        });
-    }
+    });
 }
 
 function swingBat() {
     isSwinging = true;
     this.sound.play('swing', { volume: 0.3 });
     
-    // 覚醒時はバットが巨大化
-    let batScale = (gameMode === 'batter' && combo >= 3) ? 4 : 2;
-    bat.setScale(batScale);
+    // チャージによる威力補正
+    let powerBonus = swingPower / 50;
+    this.tweens.add({ targets: bat, angle: 150, x: '+=60', duration: 90, yoyo: true, onComplete: () => { isSwinging = false; bat.angle = 0; bat.x = 355; swingPower = 0; chargeBar.width = 0; } });
 
-    this.tweens.add({ targets: bat, angle: 150, x: '+=60', duration: 90, yoyo: true, onComplete: () => { isSwinging = false; bat.angle = 0; bat.x = 355; bat.setScale(2); } });
-
-    // 判定範囲も覚醒時は広く
-    let hitRange = (gameMode === 'batter' && combo >= 3) ? [2.0, 5.5] : [3.0, 4.8];
-
-    if (ball.scale > hitRange[0] && ball.scale < hitRange[1] && ballState === 'pitching') {
+    if (ball.scale > 3.0 && ball.scale < 4.8 && ballState === 'pitching') {
         ballState = 'hit';
-        if (gameMode === 'batter') { score++; combo++; messageText.setText(combo >= 3 ? 'AWAKEN!!' : 'HOMERUN!!'); }
-        else { outCount++; combo = 0; messageText.setText('HIT!!'); }
-        
+        score++;
+        messageText.setText(swingPower > 80 ? 'CRITICAL HIT!!' : 'HIT!');
         this.sound.play('hit', { volume: 0.8 });
         scoreText.setText((gameMode === 'batter' ? 'HOMERUNS: ' : 'STRIKEOUTS: ') + score);
         this.cameras.main.shake(250, 0.04);
         this.particles.emitParticleAt(ball.x, ball.y, 40);
+        
         this.tweens.add({ targets: ball, y: -150, x: Phaser.Math.Between(-200, 1000), scale: 0.1, duration: 1200 });
         this.time.delayedCall(2000, resetBall);
     }
@@ -177,7 +183,7 @@ function swingBat() {
 function updateOutDisplay() {
     let dots = '';
     for(let i=0; i<3; i++) dots += (i < outCount) ? '○' : '●';
-    outText.setText(gameMode === 'batter' ? 'OUT: ' + dots : 'HITS: ' + dots);
+    outText.setText('OUT: ' + dots);
     if (outCount >= 3) {
         messageText.setText('GAME OVER');
         this.time.delayedCall(3000, () => { location.reload(); });
@@ -185,11 +191,7 @@ function updateOutDisplay() {
 }
 
 function resetBall() {
-    if (outCount < 3) {
-        ballState = 'ready';
-        messageText.setText(gameMode === 'batter' ? (combo >= 3 ? 'KATO AWAKENED!' : 'READY?') : 'PITCH!');
-        ball.setVisible(false);
-    }
+    ballState = 'ready';
+    messageText.setText('READY?');
+    ball.setVisible(false);
 }
-
-function update() {}
