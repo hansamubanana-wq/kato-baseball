@@ -17,10 +17,7 @@ let scoreText, messageText, outText, statusText, levelText;
 let isSwinging = false;
 let ballState = 'ready'; 
 let targetPos = { x: 400, y: 530 };
-let powerMode = false; // パワーA/ミートBなどのスキル用
-
-// 加藤先生のステータス
-let stats = { meet: 50, power: 50, eye: 50 };
+let stats = { meet: 50, power: 50 };
 
 function preload() {
     this.load.audio('hit', 'https://labs.phaser.io/assets/audio/SoundEffects/p-town-spinnin.mp3');
@@ -34,47 +31,40 @@ function preload() {
 }
 
 function create() {
+    // 1. スタジアム描画
     drawStadium(this);
-    generateCharacterTextures(this);
 
+    // 2. タップ判定を確実にするための巨大な透明背景
+    const clickRegion = this.add.rectangle(400, 300, 800, 600, 0x000000, 0).setInteractive();
+
+    // 3. テクスチャとキャラ
+    generateCharacterTextures(this);
     pitcher = this.add.sprite(400, 200, 'pitcher_real');
     batter = this.add.sprite(300, 520, 'kato_real').setScale(1.8);
     bat = this.add.sprite(345, 520, 'bat_dot').setOrigin(0.5, 0.9).setScale(2.5);
     ball = this.add.sprite(400, 200, 'ball_dot').setScale(0.1).setVisible(false);
     
+    // ミートカーソル
     cursor = this.add.circle(400, 530, stats.meet, 0xffffff, 0.1);
     cursor.setStrokeStyle(2, 0xffffff, 0.3).setVisible(false);
 
-    // プロスピ風サイドボードUI
-    let uiPanel = this.add.graphics();
-    uiPanel.fillStyle(0x000000, 0.7);
-    uiPanel.fillRect(0, 0, 200, 150);
-
+    // 4. UI（タップを邪魔しないよう配置）
     scoreText = this.add.text(20, 20, 'HR: 0', { fontSize: '24px', fill: '#ffd700', fontStyle: 'bold' });
     levelText = this.add.text(20, 50, 'LV: 1', { fontSize: '18px', fill: '#fff' });
     outText = this.add.text(20, 80, 'OUT: ●●●', { fontSize: '18px', fill: '#ff4444' });
-    statusText = this.add.text(20, 110, 'MEET: B / POW: C', { fontSize: '14px', fill: '#aaa' });
-
-    messageText = this.add.text(400, 300, 'CHAMPIONSHIP SERIES', { fontSize: '42px', fill: '#fff', fontStyle: 'bold', stroke: '#000', strokeThickness: 4 }).setOrigin(0.5);
+    statusText = this.add.text(20, 110, `MEET: ${stats.meet} / POW: ${stats.power}`, { fontSize: '14px', fill: '#aaa' });
+    messageText = this.add.text(400, 300, 'KATO BASEBALL', { fontSize: '42px', fill: '#fff', fontStyle: 'bold' }).setOrigin(0.5);
 
     this.particles = this.add.particles(0, 0, 'spark', { speed: 250, scale: { start: 2, end: 0 }, emitting: false });
 
-    // 操作：クリックで即スイング、押し続けで「強振」準備
-    this.input.on('pointerdown', () => {
+    // --- 確実に反応するタップイベント ---
+    clickRegion.on('pointerdown', () => {
         if (ballState === 'ready') {
             startPitchSequence.call(this);
         } else if (ballState === 'pitching' && !isSwinging) {
             swingBat.call(this);
         }
     });
-}
-
-function generateCharacterTextures(scene) {
-    const katoData = ['....AAAAAA......','...A111111A.....','..A11111111A....','..A17711771A....','..A17211721A....','..A11111111A....','..A11555511A....','...A111111A.....','....A2222A......','...A222222A.....','..A22222222A....','.A2222222222A...','.A2222222222A...','..A22222222A....','...A22..22A.....','....AA..AA......'];
-    scene.textures.generate('kato_real', { data: katoData, pixelWidth: 5 });
-    scene.textures.generate('pitcher_real', { data: katoData, pixelWidth: 4 });
-    scene.textures.generate('ball_dot', { data: ['.FF.','FFFF','FFFF','.FF.'], pixelWidth: 8 });
-    scene.textures.generate('bat_dot', { data: ['66','66','66','66','66','66','66','66'], pixelWidth: 10 });
 }
 
 function startPitchSequence() {
@@ -86,12 +76,10 @@ function startPitchSequence() {
 function throwBall() {
     ballState = 'pitching';
     ball.setVisible(true).setPosition(400, 200).setScale(0.1);
-    
-    // スコアに応じて変化球が鋭くなる
     targetPos.x = 400 + Phaser.Math.Between(-80, 80);
     cursor.setPosition(targetPos.x, targetPos.y).setVisible(true).setAlpha(0);
     
-    let duration = 1000 - (level * 20);
+    let duration = Math.max(1000 - (level * 20), 300);
     this.tweens.add({
         targets: ball,
         x: targetPos.x, y: targetPos.y, scale: 5,
@@ -104,7 +92,7 @@ function throwBall() {
                 messageText.setText('STRIKE!');
                 this.sound.play('out');
                 outCount++;
-                updateStats.call(this, false);
+                updateStats.call(this);
                 this.time.delayedCall(1000, resetStage);
             }
         }
@@ -113,49 +101,55 @@ function throwBall() {
 
 function swingBat() {
     isSwinging = true;
-    this.sound.play('swing');
+    this.sound.play('swing', { volume: 0.5 });
 
     this.tweens.add({
         targets: bat,
-        angle: 160, x: '+=70', duration: 80, yoyo: true,
-        onComplete: () => { isSwinging = false; bat.angle = 0; bat.x = 345; }
+        angle: 160,
+        x: '+=70',
+        duration: 80,
+        yoyo: true,
+        onComplete: () => {
+            isSwinging = false;
+            bat.angle = 0;
+            bat.x = 345;
+        }
     });
 
-    // 判定（ミート力の値を反映）
     let dist = Phaser.Math.Distance.Between(ball.x, ball.y, cursor.x, cursor.y);
-    if (ballState === 'pitching' && ball.scale > 3.5 && dist < stats.meet) {
+    // 判定時間を少し広げました (scale 3.0 ~ 5.0)
+    if (ballState === 'pitching' && ball.scale > 3.0 && ball.scale < 5.0 && dist < stats.meet) {
         ballState = 'hit';
         score++;
-        exp += 20;
-        this.sound.play('hit');
+        exp += 25;
+        this.sound.play('hit', { volume: 1.0 });
         messageText.setText('HOMERUN!!');
         this.cameras.main.shake(300, 0.05);
         this.particles.emitParticleAt(ball.x, ball.y, 50);
 
         this.tweens.add({ targets: ball, y: -200, x: (ball.x - 400) * 10, scale: 0.2, duration: 1500 });
-        updateStats.call(this, true);
+        updateStats.call(this);
         this.time.delayedCall(2000, resetStage);
     }
 }
 
-function updateStats(isHit) {
+function updateStats() {
     if (exp >= 100) {
         level++;
         exp = 0;
         stats.meet += 5;
         stats.power += 5;
-        messageText.setText('LEVEL UP!');
+        cursor.setRadius(stats.meet);
     }
-    
     scoreText.setText('HR: ' + score);
-    levelText.setText('LV: ' + level + ' (EXP: ' + exp + '%)');
+    levelText.setText(`LV: ${level} (EXP: ${exp}%)`);
     let dots = '';
     for(let i=0; i<3; i++) dots += (i < outCount) ? '○' : '●';
     outText.setText('OUT: ' + dots);
     statusText.setText(`MEET: ${stats.meet} / POW: ${stats.power}`);
 
     if (outCount >= 3) {
-        messageText.setText('SEASON OVER');
+        messageText.setText('GAME OVER');
         this.time.delayedCall(3000, () => location.reload());
     }
 }
@@ -170,12 +164,19 @@ function resetStage() {
 }
 
 function drawStadium(scene) {
-    let bg = scene.add.graphics();
-    bg.fillGradientStyle(0x000033, 0x000033, 0x003300, 0x003300, 1);
-    bg.fillRect(0, 0, 800, 600);
     let field = scene.add.graphics();
+    field.fillGradientStyle(0x000033, 0x000033, 0x003300, 0x003300, 1);
+    field.fillRect(0, 0, 800, 600);
     field.fillStyle(0x1a4a1a, 1);
     field.fillPoints([{ x: 300, y: 220 }, { x: 500, y: 220 }, { x: 900, y: 600 }, { x: -100, y: 600 }], true);
+}
+
+function generateCharacterTextures(scene) {
+    const katoData = ['....AAAAAA......','...A111111A.....','..A11111111A....','..A17711771A....','..A17211721A....','..A11111111A....','..A11555511A....','...A111111A.....','....A2222A......','...A222222A.....','..A22222222A....','.A2222222222A...','.A2222222222A...','..A22222222A....','...A22..22A.....','....AA..AA......'];
+    scene.textures.generate('kato_real', { data: katoData, pixelWidth: 5 });
+    scene.textures.generate('pitcher_real', { data: katoData, pixelWidth: 4 });
+    scene.textures.generate('ball_dot', { data: ['.FF.','FFFF','FFFF','.FF.'], pixelWidth: 8 });
+    scene.textures.generate('bat_dot', { data: ['66','66','66','66','66','66','66','66'], pixelWidth: 10 });
 }
 
 function update() {}
