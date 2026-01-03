@@ -21,12 +21,15 @@ const game = new Phaser.Game(config);
 let ball, batter, bat, pitcher;
 let score = 0;
 let outCount = 0;
+let combo = 0; // 覚醒用のコンボ
 let scoreText, messageText, outText, quoteText;
 let isSwinging = false;
-let ballState = 'title'; // title, ready, pitching, hit, missed
-let gameMode = 'batter'; // batter or pitcher
-let selectedCourse = 400; // 投手モード用：コース選択
-let selectedType = 'straight'; // 投手モード用：球種選択
+let ballState = 'title'; 
+let gameMode = 'batter'; 
+let selectedCourse = 400; 
+let selectedType = 'straight'; 
+
+const katoQuotes = ["よし！", "完璧だ！", "熱血覚醒！", "教育の力だ！", "単位倍増！"];
 
 function preload() {
     this.load.audio('hit', 'https://labs.phaser.io/assets/audio/SoundEffects/p-town-spinnin.mp3');
@@ -40,41 +43,26 @@ function preload() {
 }
 
 function create() {
-    // 背景・スタジアム描画（共通）
     drawStadium(this);
-
-    // テクスチャ生成
     generateCharacterTextures(this);
 
-    // キャラ配置
     pitcher = this.add.sprite(400, 190, 'pitcher_real');
     batter = this.add.sprite(320, 500, 'kato_real').setScale(1.5);
     bat = this.add.sprite(355, 500, 'bat_dot').setOrigin(0.5, 0.9).setScale(2);
     ball = this.add.sprite(400, 190, 'ball_dot').setScale(0.1).setVisible(false);
     
-    // UI
     scoreText = this.add.text(20, 20, '', { fontSize: '32px', fill: '#fff', fontStyle: 'bold' });
     outText = this.add.text(20, 65, '', { fontSize: '24px', fill: '#f00', fontStyle: 'bold' });
-    messageText = this.add.text(400, 300, 'CHOOSE MODE', { fontSize: '60px', fill: '#ff0', fontStyle: 'bold' }).setOrigin(0.5);
-    quoteText = this.add.text(400, 400, '', { fontSize: '30px', fill: '#fff' }).setOrigin(0.5);
-
-    // モード選択ボタン
+    messageText = this.add.text(400, 300, 'KATO BASEBALL', { fontSize: '60px', fill: '#ff0', fontStyle: 'bold' }).setOrigin(0.5);
+    
     let btnBatter = this.add.text(250, 400, '[ BATTER ]', { fontSize: '32px', fill: '#fff', backgroundColor: '#00f' }).setPadding(10).setInteractive();
     let btnPitcher = this.add.text(450, 400, '[ PITCHER ]', { fontSize: '32px', fill: '#fff', backgroundColor: '#f00' }).setPadding(10).setInteractive();
 
-    btnBatter.on('pointerdown', () => {
-        gameMode = 'batter';
-        startGame(this, btnBatter, btnPitcher);
-    });
-
-    btnPitcher.on('pointerdown', () => {
-        gameMode = 'pitcher';
-        startGame(this, btnBatter, btnPitcher);
-    });
+    btnBatter.on('pointerdown', () => { gameMode = 'batter'; startGame(this, btnBatter, btnPitcher); });
+    btnPitcher.on('pointerdown', () => { gameMode = 'pitcher'; startGame(this, btnBatter, btnPitcher); });
 
     this.particles = this.add.particles(0, 0, 'spark', { speed: 200, scale: { start: 2, end: 0 }, emitting: false });
 
-    // ゲームメインクリック
     this.input.on('pointerdown', (pointer) => {
         if (ballState === 'ready' && gameMode === 'batter') preparePitch.call(this);
         else if (!isSwinging && ballState === 'pitching' && gameMode === 'batter') swingBat.call(this);
@@ -83,29 +71,22 @@ function create() {
 }
 
 function startGame(scene, b1, b2) {
-    b1.destroy();
-    b2.destroy();
-    ballState = 'ready';
-    score = 0;
-    outCount = 0;
+    b1.destroy(); b2.destroy();
+    ballState = 'ready'; score = 0; outCount = 0; combo = 0;
     scoreText.setText(gameMode === 'batter' ? 'HOMERUNS: 0' : 'STRIKEOUTS: 0');
     updateOutDisplay();
-    messageText.setText(gameMode === 'batter' ? 'READY?' : 'CLICK TO PITCH');
+    messageText.setText('PLAY BALL!');
 }
 
-// 投手モード：クリック位置でコース、キーやタイミングで球種を指定（今回は簡易的にクリック位置で制御）
 function handlePitcherControl(pointer) {
     selectedCourse = pointer.x;
-    const types = ['straight', 'curve', 'fork'];
-    selectedType = types[Math.floor(Math.random() * 3)]; // 実際はボタン等で選ばせるとより良い
-    messageText.setText(selectedType.toUpperCase() + "!");
+    selectedType = ['straight', 'curve', 'fork'][Phaser.Math.Between(0, 2)];
+    if (combo >= 2) selectedType = 'disappear'; // 必殺：消える魔球
     preparePitch.call(this);
 }
 
 function drawStadium(scene) {
     scene.add.rectangle(400, 100, 800, 200, 0x444444);
-    scene.add.rectangle(400, 185, 800, 10, 0xaaaaaa);
-    scene.add.rectangle(400, 70, 250, 100, 0x003300);
     let field = scene.add.graphics();
     field.fillStyle(0x2e7d32, 1);
     field.fillPoints([{ x: 300, y: 200 }, { x: 500, y: 200 }, { x: 850, y: 600 }, { x: -50, y: 600 }], true);
@@ -129,45 +110,39 @@ function preparePitch() {
 
 function startPitch() {
     ballState = 'pitching';
-    ball.setVisible(true).setPosition(400, 190).setScale(0.1);
+    ball.setVisible(true).setPosition(400, 190).setScale(0.1).setAlpha(1);
     
     let targetX = (gameMode === 'batter') ? 400 + Phaser.Math.Between(-30, 30) : selectedCourse;
-    let duration = 1100 - (score * 20);
     let type = (gameMode === 'batter') ? ['straight', 'curve', 'fork'][Phaser.Math.Between(0, 2)] : selectedType;
+    let duration = 1000 - (score * 15);
 
     let pitchConfig = {
         targets: ball,
         x: targetX, y: 530, scale: 4.5,
         duration: Math.max(duration, 300),
         ease: 'Cubic.easeIn',
+        onUpdate: () => {
+            if (type === 'disappear' && ball.scale > 1.5) ball.setAlpha(0); // 消える魔球
+        },
         onComplete: () => {
             if (ballState === 'pitching') {
                 ballState = 'missed';
                 messageText.setText('STRIKE!');
                 this.sound.play('out', { volume: 0.5 });
-                if (gameMode === 'pitcher') score++; // 投手モードは空振りで加点
-                else outCount++;
+                if (gameMode === 'pitcher') { score++; combo++; } else { outCount++; combo = 0; }
                 scoreText.setText((gameMode === 'batter' ? 'HOMERUNS: ' : 'STRIKEOUTS: ') + score);
                 updateOutDisplay();
                 this.time.delayedCall(1000, resetBall);
             }
         }
     };
-
     if (type === 'curve') pitchConfig.x += 160;
     if (type === 'fork') pitchConfig.duration += 400;
-
     this.tweens.add(pitchConfig);
 
-    // 投手モードの場合、CPU加藤先生が振るかどうかを判定
     if (gameMode === 'pitcher') {
         this.time.delayedCall(pitchConfig.duration * 0.8, () => {
-            if (ballState === 'pitching') {
-                // CPUが打つかどうかのランダム判定
-                if (Phaser.Math.Between(0, 10) > 7) {
-                    swingBat.call(this); // CPUスイング
-                }
-            }
+            if (ballState === 'pitching') if (Phaser.Math.Between(0, 10) > 8) swingBat.call(this);
         });
     }
 }
@@ -175,17 +150,21 @@ function startPitch() {
 function swingBat() {
     isSwinging = true;
     this.sound.play('swing', { volume: 0.3 });
-    this.tweens.add({ targets: bat, angle: 150, x: '+=60', duration: 90, yoyo: true, onComplete: () => { isSwinging = false; bat.angle = 0; bat.x = 355; } });
+    
+    // 覚醒時はバットが巨大化
+    let batScale = (gameMode === 'batter' && combo >= 3) ? 4 : 2;
+    bat.setScale(batScale);
 
-    if (ball.scale > 3.0 && ball.scale < 4.8 && ballState === 'pitching') {
+    this.tweens.add({ targets: bat, angle: 150, x: '+=60', duration: 90, yoyo: true, onComplete: () => { isSwinging = false; bat.angle = 0; bat.x = 355; bat.setScale(2); } });
+
+    // 判定範囲も覚醒時は広く
+    let hitRange = (gameMode === 'batter' && combo >= 3) ? [2.0, 5.5] : [3.0, 4.8];
+
+    if (ball.scale > hitRange[0] && ball.scale < hitRange[1] && ballState === 'pitching') {
         ballState = 'hit';
-        if (gameMode === 'batter') {
-            score++;
-            messageText.setText('HOMERUN!!');
-        } else {
-            outCount++; // 投手モードで打たれたらアウトカウント（実質失点的な扱い）
-            messageText.setText('HIT!!');
-        }
+        if (gameMode === 'batter') { score++; combo++; messageText.setText(combo >= 3 ? 'AWAKEN!!' : 'HOMERUN!!'); }
+        else { outCount++; combo = 0; messageText.setText('HIT!!'); }
+        
         this.sound.play('hit', { volume: 0.8 });
         scoreText.setText((gameMode === 'batter' ? 'HOMERUNS: ' : 'STRIKEOUTS: ') + score);
         this.cameras.main.shake(250, 0.04);
@@ -208,7 +187,7 @@ function updateOutDisplay() {
 function resetBall() {
     if (outCount < 3) {
         ballState = 'ready';
-        messageText.setText(gameMode === 'batter' ? 'READY?' : 'CLICK TO PITCH');
+        messageText.setText(gameMode === 'batter' ? (combo >= 3 ? 'KATO AWAKENED!' : 'READY?') : 'PITCH!');
         ball.setVisible(false);
     }
 }
