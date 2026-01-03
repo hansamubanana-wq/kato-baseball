@@ -1,7 +1,8 @@
 const config = {
     type: Phaser.AUTO,
-    width: window.innerWidth > 800 ? 800 : window.innerWidth,
-    height: window.innerHeight > 600 ? 600 : window.innerHeight,
+    width: 800,
+    height: 600,
+    backgroundColor: '#2d2d2d', // レトロな暗い背景
     parent: 'game-container',
     physics: {
         default: 'arcade',
@@ -11,70 +12,119 @@ const config = {
         preload: preload,
         create: create,
         update: update
-    }
+    },
+    pixelArt: true // ドット絵をクッキリ表示する設定
 };
 
 const game = new Phaser.Game(config);
 
 let ball;
 let batter;
+let bat;
 let score = 0;
 let scoreText;
+let isSwinging = false;
 
 function preload() {
-    // ネット上の仮素材を使用
-    this.load.image('ball', 'https://labs.phaser.io/assets/sprites/shinyball.png');
-    this.load.image('stadium', 'https://labs.phaser.io/assets/skies/space3.png');
-    this.load.image('kato', 'https://labs.phaser.io/assets/sprites/phaser-dude.png');
+    // 今回は外部画像を使わず、プログラム内でドット絵を生成します
 }
 
 function create() {
-    this.add.image(400, 300, 'stadium').setDisplaySize(800, 600);
-    
-    scoreText = this.add.text(16, 16, 'HomeRuns: 0', { 
-        fontSize: '32px', 
-        fill: '#fff',
-        stroke: '#000',
-        strokeThickness: 6 
+    // スコア表示（レトロなフォント風）
+    scoreText = this.add.text(20, 20, 'HOMERUN: 0', { 
+        fontSize: '40px', 
+        fill: '#00ff00',
+        fontFamily: 'Courier New'
     });
 
-    batter = this.physics.add.sprite(config.width / 2, config.height - 100, 'kato');
+    // --- ドット絵の生成 ---
+    // 加藤先生（ドット絵風のテクスチャを作成）
+    const katoData = [
+        '..777..',
+        '.77777.',
+        '7717177',
+        '7777777',
+        '.72227.',
+        '..777..'
+    ];
+    this.textures.generate('kato_dot', { data: katoData, pixelWidth: 10 });
+
+    // ボール（ドット絵風）
+    const ballData = [
+        '.FF.',
+        'FFFF',
+        'FFFF',
+        '.FF.'
+    ];
+    this.textures.generate('ball_dot', { data: ballData, pixelWidth: 8 });
+
+    // バット（ドット絵風）
+    const batData = [
+        '66',
+        '66',
+        '66',
+        '66',
+        '66',
+        '66'
+    ];
+    this.textures.generate('bat_dot', { data: batData, pixelWidth: 10 });
+
+    // ----------------------
+
+    // キャラクター配置
+    batter = this.add.sprite(400, 520, 'kato_dot');
     batter.setScale(2);
 
-    ball = this.physics.add.sprite(config.width / 2, -50, 'ball');
+    bat = this.add.sprite(450, 520, 'bat_dot');
+    bat.setOrigin(0.5, 1); // 持ち手を支点にする
+
+    ball = this.physics.add.sprite(400, -50, 'ball_dot');
     
+    // クリック・タップでスイング
     this.input.on('pointerdown', () => {
-        swingBat.call(this);
+        if (!isSwinging) swingBat.call(this);
     });
 
     startPitch();
 }
 
 function startPitch() {
-    ball.setPosition(config.width / 2, 50);
-    ball.setVelocity(0, 400 + Math.random() * 300);
+    ball.setPosition(400 + (Math.random() * 40 - 20), 50);
+    ball.setVelocity(0, 450);
 }
 
 function swingBat() {
+    isSwinging = true;
+
+    // バットを振るアニメーション
     this.tweens.add({
-        targets: batter,
-        angle: -45,
-        duration: 100,
-        yoyo: true
+        targets: bat,
+        angle: -120,
+        duration: 150,
+        yoyo: true,
+        onComplete: () => {
+            isSwinging = false;
+            bat.angle = 0;
+        }
     });
 
-    let distance = Phaser.Math.Distance.Between(ball.x, ball.y, batter.x, batter.y);
-    if (distance < 80 && ball.y > batter.y - 50) {
-        ball.setVelocity(Phaser.Math.Between(-300, 300), -1000);
+    // 当たり判定
+    let distance = Phaser.Math.Distance.Between(ball.x, ball.y, bat.x, bat.y);
+    if (distance < 60 && ball.y > 450 && ball.y < 550) {
+        // ホームラン！
+        ball.setVelocity(Phaser.Math.Between(-200, 200), -1000);
         score += 1;
-        scoreText.setText('HomeRuns: ' + score);
-        this.cameras.main.shake(200, 0.01);
-        setTimeout(startPitch, 1500);
+        scoreText.setText('HOMERUN: ' + score);
+        
+        // 画面フラッシュ演出
+        this.cameras.main.flash(100, 255, 255, 255);
+        
+        this.time.delayedCall(1500, startPitch, [], this);
     }
 }
 
 function update() {
-    if (ball.y > config.height + 50) {
+    if (ball.y > 650) {
         startPitch();
     }
 }
